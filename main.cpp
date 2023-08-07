@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -313,13 +314,15 @@ private:
   {
     constexpr auto oversized = []
     {
-      auto buffer = std::array<std::byte, 2048> {};
+      auto buffer = std::array<std::byte, 256> {};
       auto usedBytes = 0ULL;
       auto appendData = [&]<typename T>(T const& data) -> void
       {
-        auto bytes = std::bit_cast<std::array<std::byte, sizeof(T)>>(data);
+        constexpr auto size = sizeof(T);
+        THROW_IF(size + usedBytes >= buffer.size(), "Buffer not big enough");
+        auto bytes = std::bit_cast<std::array<std::byte, size>>(data);
         std::copy(bytes.begin(), bytes.end(), buffer.data() + usedBytes);
-        usedBytes += sizeof(T);
+        usedBytes += size;
       };
       auto alignBuffer = [&](std::size_t alignment) -> void
       { usedBytes += usedBytes % alignment; };
@@ -694,7 +697,11 @@ int TryMain(HINSTANCE hInstance)
 
 }  // namespace
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
+int WINAPI wWinMain(  //
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE,
+    _In_ LPWSTR,
+    _In_ int)
 {
   try {
     return TryMain(hInstance);
