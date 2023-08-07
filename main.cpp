@@ -614,6 +614,9 @@ int TryMain(HINSTANCE hInstance)
     return 0;
   }
 
+  (void)SetThreadDpiAwarenessContext(
+      DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
   TRY_HR(CoInitialize(nullptr));
 
   auto guid = GUID {};
