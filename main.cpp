@@ -419,6 +419,8 @@ struct State
   ComPtr<IAudioEndpointVolume> endpointVolume {};
 };
 
+#define GPL_URL L"https://www.gnu.org/licenses/"
+
 wchar_t const* gplNotice =
     L""
     "AlwaysMute to keep the default audio device on Windows quiet\n"
@@ -431,7 +433,7 @@ wchar_t const* gplNotice =
     "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the\n"
     "GNU General Public License for more details.\n\n"
     "You should have received a copy of the GNU General Public License\n"
-    "along with AlwaysMute. If not, see <https://www.gnu.org/licenses/>.";
+    "along with AlwaysMute. If not, see <" GPL_URL ">.";
 
 INT_PTR CALLBACK DialogProc(  //
     HWND hwnd,
@@ -458,11 +460,12 @@ INT_PTR CALLBACK DialogProc(  //
                    != 0,
                "Couldn't set URL autodetection");
 
-      THROW_IF(SendDlgItemMessageW(hwnd,
-                                   LicenseDialogData::textId,
-                                   WM_SETTEXT,
-                                   0,
-                                   reinterpret_cast<LPARAM>(gplNotice))
+      THROW_IF(SendDlgItemMessageW(  //
+                   hwnd,
+                   LicenseDialogData::textId,
+                   WM_SETTEXT,
+                   0,
+                   reinterpret_cast<LPARAM>(gplNotice))
                    != TRUE,
                "Couldn't set GPL notice");
 
@@ -474,23 +477,11 @@ INT_PTR CALLBACK DialogProc(  //
           if (LOWORD(wParam) != LicenseDialogData::textId) {
             break;
           }
-          auto* enlink = reinterpret_cast<ENLINK*>(lParam);
-          switch (enlink->msg) {
-            case WM_LBUTTONUP: {
-              auto buffer = std::make_unique<wchar_t[]>(
-                  static_cast<std::size_t>(enlink->chrg.cpMax)
-                  - enlink->chrg.cpMin + 1);
-              auto range = TEXTRANGE {enlink->chrg, buffer.get()};
-              (void)SendDlgItemMessageW(  //
-                  hwnd,
-                  LicenseDialogData::textId,
-                  EM_GETTEXTRANGE,
-                  0,
-                  reinterpret_cast<LPARAM>(&range));
+          switch (reinterpret_cast<ENLINK*>(lParam)->msg) {
+            case WM_LBUTTONUP:
               (void)ShellExecuteW(
-                  hwnd, L"open", buffer.get(), nullptr, nullptr, SW_SHOW);
+                  hwnd, L"open", GPL_URL, nullptr, nullptr, SW_SHOW);
               return TRUE;
-            }
           }
           break;
         }
