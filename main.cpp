@@ -92,15 +92,16 @@ struct Handle
 {
   HANDLE handle {};
 
-  Handle(HANDLE handle)
+  explicit Handle(HANDLE handle)
       : handle(handle)
   {
   }
 
   ~Handle() noexcept(false)
   {
-    THROW_IF(handle != nullptr && CloseHandle(handle) == 0,
-             "CloseHandle failed");
+    if (handle != nullptr) {
+      TRY_BOOL(CloseHandle(handle));
+    }
   }
 };
 
@@ -108,7 +109,7 @@ struct Library
 {
   HINSTANCE library {};
 
-  Library(LPCWSTR name)
+  explicit Library(LPCWSTR name)
       : library(LoadLibraryW(name))
   {
     THROW_IF(library == nullptr, "LoadLibrary failed");
@@ -116,8 +117,9 @@ struct Library
 
   ~Library() noexcept(false)
   {
-    THROW_IF(library != nullptr && FreeLibrary(library) == 0,
-             "FreeLibrary failed");
+    if (library != nullptr) {
+      TRY_BOOL(FreeLibrary(library));
+    }
   }
 };
 
@@ -126,7 +128,7 @@ class TrayIcon
   NOTIFYICONDATAW* iconData {};
 
 public:
-  TrayIcon(NOTIFYICONDATAW& iconData)
+  explicit TrayIcon(NOTIFYICONDATAW& iconData)
       : iconData(&iconData)
   {
     THROW_IF(Shell_NotifyIconW(NIM_ADD, &iconData) == FALSE,
@@ -147,8 +149,8 @@ class EndpointHandler : public IAudioEndpointVolumeCallback
   HWND window {};
 
 public:
-  EndpointHandler(GUID* guid, HWND window)
-      : guid(guid)
+  EndpointHandler(GUID& guid, HWND window)
+      : guid(&guid)
       , window(window)
   {
   }
@@ -174,16 +176,21 @@ public:
   }
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
-                                           VOID** ppvInterface) override
+                                           void** ppvObject) override
   {
-    if (IID_IUnknown != riid || __uuidof(IAudioEndpointVolumeCallback) != riid)
+    if (ppvObject == nullptr) {
+      return E_POINTER;
+    }
+
+    if (__uuidof(IUnknown) != riid
+        || __uuidof(IAudioEndpointVolumeCallback) != riid)
     {
-      *ppvInterface = nullptr;
+      *ppvObject = nullptr;
       return E_NOINTERFACE;
     }
 
     AddRef();
-    *ppvInterface = this;
+    *ppvObject = this;
     return S_OK;
   }
 
@@ -211,7 +218,7 @@ class NotificationClient : public IMMNotificationClient
   HWND window {};
 
 public:
-  NotificationClient(HWND window)
+  explicit NotificationClient(HWND window)
       : window(window)
   {
   }
@@ -237,15 +244,19 @@ public:
   }
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
-                                           VOID** ppvInterface) override
+                                           void** ppvObject) override
   {
-    if (IID_IUnknown != riid || __uuidof(IMMNotificationClient) != riid) {
-      *ppvInterface = nullptr;
+    if (ppvObject == nullptr) {
+      return E_POINTER;
+    }
+
+    if (__uuidof(IUnknown) != riid || __uuidof(IMMNotificationClient) != riid) {
+      *ppvObject = nullptr;
       return E_NOINTERFACE;
     }
 
     AddRef();
-    *ppvInterface = this;
+    *ppvObject = this;
     return S_OK;
   }
 
@@ -517,19 +528,18 @@ LRESULT CALLBACK MainWndProc(  //
     LPARAM lParam)
 {
   switch (message) {
-    case WM_CREATE:
+    case WM_CREATE: {
+      auto* state = reinterpret_cast<CREATESTRUCT*>(lParam)->lpCreateParams;
       SetLastError(0);
       if (SetWindowLongPtrW(
-              hwnd,
-              GWLP_USERDATA,
-              reinterpret_cast<LONG_PTR>(
-                  reinterpret_cast<CREATESTRUCT*>(lParam)->lpCreateParams))
+              hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state))
           != 0)
       {
         break;
       }
       THROW_IF(GetLastError() != 0, "SetWindowLongPtrW failed");
       break;
+    }
     case UserMessage::TrayIcon:
       switch (LOWORD(lParam)) {
         case WM_RBUTTONDOWN:
@@ -541,12 +551,12 @@ LRESULT CALLBACK MainWndProc(  //
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
       THROW_IF(userData == 0, "GetWindowLongPtrW failed");
 
-      auto* state = reinterpret_cast<State*>(userData);
-      state->endpointVolume.reset();
-      state->audioDevice.reset();
+      auto& state = *reinterpret_cast<State*>(userData);
+      state.endpointVolume.reset();
+      state.audioDevice.reset();
 
-      if (auto result = state->deviceEnumerator->GetDefaultAudioEndpoint(
-              eRender, eConsole, std::out_ptr(state->audioDevice));
+      if (auto result = state.deviceEnumerator->GetDefaultAudioEndpoint(
+              eRender, eConsole, std::out_ptr(state.audioDevice));
           result == E_NOTFOUND)
       {
         break;
@@ -554,13 +564,14 @@ LRESULT CALLBACK MainWndProc(  //
         THROW_IF(FAILED(result), "GetDefaultAudioEndpoint failed");
       }
 
-      TRY_HR(state->audioDevice->Activate(__uuidof(IAudioEndpointVolume),
-                                          CLSCTX_INPROC_SERVER,
-                                          nullptr,
-                                          std::out_ptr(state->endpointVolume)));
-      TRY_HR(state->endpointVolume->RegisterControlChangeNotify(
-          new EndpointHandler(state->guid, hwnd)));
-      ChangeAudio(*state);
+      TRY_HR(state.audioDevice->Activate(  //
+          __uuidof(IAudioEndpointVolume),
+          CLSCTX_INPROC_SERVER,
+          nullptr,
+          std::out_ptr(state.endpointVolume)));
+      TRY_HR(state.endpointVolume->RegisterControlChangeNotify(
+          new EndpointHandler(*state.guid, hwnd)));
+      ChangeAudio(state);
       break;
     }
     case UserMessage::ChangeAudio: {
@@ -602,9 +613,9 @@ LRESULT CALLBACK MainWndProc(  //
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
       THROW_IF(userData == 0, "GetWindowLongPtrW failed");
 
-      auto* state = reinterpret_cast<State*>(userData);
-      if (state->dialog != nullptr) {
-        TRY_BOOL(DestroyWindow(state->dialog));
+      auto& state = *reinterpret_cast<State*>(userData);
+      if (state.dialog != nullptr) {
+        TRY_BOOL(DestroyWindow(state.dialog));
       }
 
       PostQuitMessage(0);
@@ -631,11 +642,12 @@ int TryMain(HINSTANCE hInstance)
   TRY_HR(CoCreateGuid(&guid));
 
   auto deviceEnumerator = ComPtr<IMMDeviceEnumerator>();
-  TRY_HR(CoCreateInstance(__uuidof(MMDeviceEnumerator),
-                          nullptr,
-                          CLSCTX_INPROC_SERVER,
-                          __uuidof(IMMDeviceEnumerator),
-                          std::out_ptr(deviceEnumerator)));
+  TRY_HR(CoCreateInstance(  //
+      __uuidof(MMDeviceEnumerator),
+      nullptr,
+      CLSCTX_INPROC_SERVER,
+      __uuidof(IMMDeviceEnumerator),
+      std::out_ptr(deviceEnumerator)));
 
   auto richEdit = Library(L"Riched20.dll");
   auto cursor = LoadCursorW(nullptr, IDC_ARROW);
