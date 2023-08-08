@@ -75,7 +75,15 @@ struct UserMessage
 template<typename Derived, typename Base>
 concept DerivedFrom = std::is_base_of_v<Base, Derived>;
 
-using ComPtrDeleter = decltype([](IUnknown* ptr) { if (ptr != nullptr) ptr->Release(); });
+struct ComPtrDeleter
+{
+  void operator()(IUnknown* ptr)
+  {
+    if (ptr != nullptr) {
+      ptr->Release();
+    }
+  }
+};
 
 template<DerivedFrom<IUnknown> T>
 using ComPtr = std::unique_ptr<T, ComPtrDeleter>;
