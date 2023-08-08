@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -394,10 +395,10 @@ private:
       return std::make_pair(buffer, usedBytes);
     }();
 
-    auto storage = Storage<oversized.second> {};
-    std::copy(oversized.first.data(),
-              oversized.first.data() + oversized.second,
-              storage.buffer);
+    constexpr auto size = oversized.second;
+    auto storage = Storage<size> {};
+    auto it = oversized.first.begin();
+    std::copy(it, it + size, storage.buffer);
     return storage;
   }();
 
