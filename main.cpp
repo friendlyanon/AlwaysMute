@@ -62,11 +62,11 @@ namespace
 
 struct UserMessage
 {
-  enum : UINT
+  enum enum_ : UINT
   {
     TrayIcon = WM_USER,
-    GetDefaultEndpoint = WM_USER + 1,
-    ChangeAudio = WM_USER + 2,
+    GetDefaultEndpoint,
+    ChangeAudio,
   };
   static constexpr WORD TrayLicense = 1;
   static constexpr WORD TrayExit = 2;
