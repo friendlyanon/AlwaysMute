@@ -334,20 +334,32 @@ private:
   {
     constexpr auto oversized = []
     {
+      using u16 = std::uint16_t;
+
       auto buffer = std::array<std::byte, 256> {};
       auto usedBytes = 0ULL;
-      auto appendData = [&]<typename T>(T const& data) -> void
+      auto data = [&]<typename T>(T const& data_) -> void
       {
         constexpr auto size = sizeof(T);
         THROW_IF(size + usedBytes >= buffer.size(), "Buffer not big enough");
-        auto bytes = std::bit_cast<std::array<std::byte, size>>(data);
+        auto bytes = std::bit_cast<std::array<std::byte, size>>(data_);
         std::copy(bytes.begin(), bytes.end(), buffer.data() + usedBytes);
         usedBytes += size;
       };
-      auto alignBuffer = [&](std::size_t alignment) -> void
+      auto align = [&](std::size_t alignment) -> void
       { usedBytes += usedBytes % alignment; };
+      auto trail = [&](auto const& data_) -> void
+      {
+        align(sizeof(WORD));
+        data(data_);
+      };
+      auto item = [&](auto const& data_) -> void
+      {
+        align(sizeof(DWORD));
+        data(data_);
+      };
 
-      appendData(DLGTEMPLATE {
+      data(DLGTEMPLATE {
           .style = DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP
               | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
           .dwExtendedStyle = 0,
@@ -357,14 +369,13 @@ private:
           .cx = 249,
           .cy = 152,
       });
-      appendData(WORD {0});
-      appendData(WORD {0});
-      appendData(L"License");
-      appendData(WORD {8});
-      appendData(L"MS Shell Dlg");
+      trail(u16 {0});
+      trail(u16 {0});
+      trail(L"License");
+      trail(u16 {8});
+      trail(L"MS Shell Dlg");
 
-      alignBuffer(sizeof(DWORD));
-      appendData(DLGITEMTEMPLATE {
+      item(DLGITEMTEMPLATE {
           .style = BS_DEFPUSHBUTTON | WS_VISIBLE,
           .dwExtendedStyle = 0,
           .x = 192,
@@ -373,13 +384,12 @@ private:
           .cy = 14,
           .id = buttonId,
       });
-      appendData(WORD {0xFFFF});
-      appendData(WORD {0x0080});
-      appendData(L"OK");
-      appendData(WORD {0});
+      trail(u16 {0xFFFF});
+      trail(u16 {0x0080});
+      trail(L"OK");
+      trail(u16 {0});
 
-      alignBuffer(sizeof(DWORD));
-      appendData(DLGITEMTEMPLATE {
+      item(DLGITEMTEMPLATE {
           .style = ES_MULTILINE | ES_READONLY | WS_VISIBLE,
           .dwExtendedStyle = 0,
           .x = 7,
@@ -388,9 +398,9 @@ private:
           .cy = 118,
           .id = textId,
       });
-      appendData(RICHEDIT_CLASSW);
-      appendData(WORD {0});
-      appendData(WORD {0});
+      trail(RICHEDIT_CLASSW);
+      trail(u16 {0});
+      trail(u16 {0});
 
       return std::make_pair(buffer, usedBytes);
     }();
