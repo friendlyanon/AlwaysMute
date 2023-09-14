@@ -4,9 +4,15 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
+#include <ranges>
+#include <stacktrace>
 #include <stdexcept>
+#include <string_view>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 
@@ -17,31 +23,10 @@
 #include <objbase.h>
 #include <shellapi.h>
 
-#ifndef NDEBUG
-#  define GET_ERROR() \
-    do { \
-      lastError = GetLastError(); \
-    } while (false)
-static DWORD lastError;
-#else
-#  define GET_ERROR()
-#endif
-
-#define TRY_HR(x) \
-  do { \
-    if (auto _result = (x); FAILED(_result)) { \
-      GET_ERROR(); \
-      throw std::runtime_error(#x " failed"); \
-    } \
-  } while (false)
-
-#define TRY_BOOL(x) \
-  do { \
-    if (auto _result = (x); _result == 0) { \
-      GET_ERROR(); \
-      throw std::runtime_error(#x " failed"); \
-    } \
-  } while (false)
+#pragma warning(push)
+#pragma warning(disable: 4365)
+#include <comdef.h>
+#pragma warning(pop)
 
 #define PRECONDITION(x) \
   do { \
@@ -50,16 +35,41 @@ static DWORD lastError;
     } \
   } while (false)
 
-#define THROW_IF(condition, message) \
-  do { \
-    if (condition) { \
-      GET_ERROR(); \
-      throw std::runtime_error(message); \
-    } \
-  } while (false)
+using namespace std::string_view_literals;
 
 namespace
 {
+
+[[noreturn]] void throw_(
+    DWORD error, std::stacktrace stacktrace = std::stacktrace::current())
+{
+  std::cerr << stacktrace << '\n';
+  throw std::system_error(static_cast<int>(error), std::system_category());
+}
+
+void throwIf(bool condition,
+             DWORD error,
+             std::stacktrace stacktrace = std::stacktrace::current())
+{
+  if (condition) {
+    throw_(error, stacktrace);
+  }
+}
+
+void throwIf(bool condition,
+             std::stacktrace stacktrace = std::stacktrace::current())
+{
+  throwIf(condition, GetLastError(), stacktrace);
+}
+
+void throwIfCOM(HRESULT result,
+                std::stacktrace stacktrace = std::stacktrace::current())
+{
+  if (FAILED(result)) {
+    std::cerr << stacktrace << '\n';
+    _com_raise_error(result);
+  }
+}
 
 struct UserMessage
 {
@@ -101,7 +111,7 @@ struct Handle
   ~Handle() noexcept(false)
   {
     if (handle != nullptr) {
-      TRY_BOOL(CloseHandle(handle));
+      throwIf(CloseHandle(handle) == 0);
     }
   }
 };
@@ -113,13 +123,13 @@ struct Library
   explicit Library(LPCWSTR name)
       : library(LoadLibraryW(name))
   {
-    THROW_IF(library == nullptr, "LoadLibrary failed");
+    throwIf(library == nullptr);
   }
 
   ~Library() noexcept(false)
   {
     if (library != nullptr) {
-      TRY_BOOL(FreeLibrary(library));
+      throwIf(FreeLibrary(library) == 0);
     }
   }
 };
@@ -132,14 +142,12 @@ public:
   explicit TrayIcon(NOTIFYICONDATAW& iconData)
       : iconData(&iconData)
   {
-    THROW_IF(Shell_NotifyIconW(NIM_ADD, &iconData) == FALSE,
-             "Shell_NotifyIconW(NIM_ADD) failed");
+    throwIf(Shell_NotifyIconW(NIM_ADD, &iconData) == FALSE);
   }
 
   ~TrayIcon() noexcept(false)
   {
-    THROW_IF(Shell_NotifyIconW(NIM_DELETE, iconData) == FALSE,
-             "Shell_NotifyIconW(NIM_DELETE) failed");
+    throwIf(Shell_NotifyIconW(NIM_DELETE, iconData) == FALSE);
   }
 };
 
@@ -297,23 +305,26 @@ public:
 void ShowContextMenu(HWND hwnd)
 {
   auto popup = CreatePopupMenu();
-  THROW_IF(popup == nullptr, "CreatePopupMenu failed");
+  throwIf(popup == nullptr);
 
-  TRY_BOOL(InsertMenuW(popup,
-                       0,
-                       MF_BYPOSITION | MF_STRING,
-                       UserMessage::TrayLicense,
-                       L"License"));
+  throwIf(InsertMenuW(popup,
+                      0,
+                      MF_BYPOSITION | MF_STRING,
+                      UserMessage::TrayLicense,
+                      L"License")
+          == 0);
 
-  TRY_BOOL(InsertMenuW(
-      popup, 1, MF_BYPOSITION | MF_STRING, UserMessage::TrayExit, L"Exit"));
+  throwIf(
+      InsertMenuW(
+          popup, 1, MF_BYPOSITION | MF_STRING, UserMessage::TrayExit, L"Exit")
+      == 0);
 
   (void)SetForegroundWindow(hwnd);
 
   auto point = POINT {};
-  TRY_BOOL(GetCursorPos(&point));
+  throwIf(GetCursorPos(&point) == 0);
 
-  TRY_BOOL(TrackPopupMenu(popup, 0, point.x, point.y, 0, hwnd, nullptr));
+  throwIf(TrackPopupMenu(popup, 0, point.x, point.y, 0, hwnd, nullptr) == 0);
 }
 
 class LicenseDialogData
@@ -341,7 +352,10 @@ private:
       auto data = [&]<typename T>(T const& data_) -> void
       {
         constexpr auto size = sizeof(T);
-        THROW_IF(size + usedBytes >= buffer.size(), "Buffer not big enough");
+        if (size + usedBytes >= buffer.size()) {
+          throw std::runtime_error("Buffer not big enough");
+        }
+
         auto bytes = std::bit_cast<std::array<std::byte, size>>(data_);
         std::copy(bytes.begin(), bytes.end(), buffer.data() + usedBytes);
         usedBytes += size;
@@ -455,29 +469,27 @@ INT_PTR CALLBACK DialogProc(  //
     case WM_INITDIALOG: {
       SetLastError(0);
       if (SetWindowLongPtrW(hwnd, GWLP_USERDATA, lParam) == 0) {
-        THROW_IF(GetLastError() != 0, "SetWindowLongPtrW failed");
+        throwIf(GetLastError() != 0);
       }
 
       (void)SendDlgItemMessageW(
           hwnd, LicenseDialogData::textId, EM_SETEVENTMASK, 0, ENM_LINK);
 
-      THROW_IF(SendDlgItemMessageW(  //
-                   hwnd,
-                   LicenseDialogData::textId,
-                   EM_AUTOURLDETECT,
-                   AURL_ENABLEURL,
-                   0)
-                   != 0,
-               "Couldn't set URL autodetection");
+      throwIf(SendDlgItemMessageW(  //
+                  hwnd,
+                  LicenseDialogData::textId,
+                  EM_AUTOURLDETECT,
+                  AURL_ENABLEURL,
+                  0)
+              != 0);
 
-      THROW_IF(SendDlgItemMessageW(  //
-                   hwnd,
-                   LicenseDialogData::textId,
-                   WM_SETTEXT,
-                   0,
-                   reinterpret_cast<LPARAM>(gplNotice))
-                   != TRUE,
-               "Couldn't set GPL notice");
+      throwIf(SendDlgItemMessageW(  //
+                  hwnd,
+                  LicenseDialogData::textId,
+                  WM_SETTEXT,
+                  0,
+                  reinterpret_cast<LPARAM>(gplNotice))
+              != TRUE);
 
       return TRUE;
     }
@@ -500,16 +512,16 @@ INT_PTR CALLBACK DialogProc(  //
     case WM_COMMAND:
       switch (LOWORD(wParam)) {
         case LicenseDialogData::buttonId:
-          TRY_BOOL(DestroyWindow(hwnd));
+          throwIf(DestroyWindow(hwnd) == 0);
           return TRUE;
       }
       break;
     case WM_CLOSE:
-      TRY_BOOL(DestroyWindow(hwnd));
+      throwIf(DestroyWindow(hwnd) == 0);
       return TRUE;
     case WM_DESTROY: {
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-      THROW_IF(userData == 0, "GetWindowLongPtrW failed");
+      throwIf(userData == 0);
       *reinterpret_cast<HWND*>(userData) = nullptr;
       return TRUE;
     }
@@ -520,7 +532,8 @@ INT_PTR CALLBACK DialogProc(  //
 
 void ChangeAudio(State& state)
 {
-  TRY_HR(state.endpointVolume->SetMasterVolumeLevelScalar(0.0f, state.guid));
+  throwIfCOM(
+      state.endpointVolume->SetMasterVolumeLevelScalar(0.0f, state.guid));
 }
 
 LRESULT CALLBACK MainWndProc(  //
@@ -539,7 +552,7 @@ LRESULT CALLBACK MainWndProc(  //
       {
         break;
       }
-      THROW_IF(GetLastError() != 0, "SetWindowLongPtrW failed");
+      throwIf(GetLastError() != 0);
       break;
     }
     case UserMessage::TrayIcon:
@@ -551,7 +564,7 @@ LRESULT CALLBACK MainWndProc(  //
       break;
     case UserMessage::GetDefaultEndpoint: {
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-      THROW_IF(userData == 0, "GetWindowLongPtrW failed");
+      throwIf(userData == 0);
 
       auto& state = *reinterpret_cast<State*>(userData);
       state.endpointVolume.reset();
@@ -563,22 +576,22 @@ LRESULT CALLBACK MainWndProc(  //
       {
         break;
       } else {
-        THROW_IF(FAILED(result), "GetDefaultAudioEndpoint failed");
+        throwIfCOM(result);
       }
 
-      TRY_HR(state.audioDevice->Activate(  //
+      throwIfCOM(state.audioDevice->Activate(  //
           __uuidof(IAudioEndpointVolume),
           CLSCTX_INPROC_SERVER,
           nullptr,
           std::out_ptr(state.endpointVolume)));
-      TRY_HR(state.endpointVolume->RegisterControlChangeNotify(
+      throwIfCOM(state.endpointVolume->RegisterControlChangeNotify(
           new EndpointHandler(*state.guid, hwnd)));
       ChangeAudio(state);
       break;
     }
     case UserMessage::ChangeAudio: {
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-      THROW_IF(userData == 0, "GetWindowLongPtrW failed");
+      throwIf(userData == 0);
 
       ChangeAudio(*reinterpret_cast<State*>(userData));
       break;
@@ -587,7 +600,7 @@ LRESULT CALLBACK MainWndProc(  //
       switch (LOWORD(wParam)) {
         case UserMessage::TrayLicense: {
           auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-          THROW_IF(userData == 0, "GetWindowLongPtrW failed");
+          throwIf(userData == 0);
 
           auto& state = *reinterpret_cast<State*>(userData);
           if (state.dialog != nullptr) {
@@ -600,24 +613,24 @@ LRESULT CALLBACK MainWndProc(  //
               nullptr,
               DialogProc,
               reinterpret_cast<LPARAM>(&state.dialog));
-          THROW_IF(state.dialog == nullptr, "Couldn't create license dialog");
+          throwIf(state.dialog == nullptr);
           break;
         }
         case UserMessage::TrayExit:
-          TRY_BOOL(DestroyWindow(hwnd));
+          throwIf(DestroyWindow(hwnd) == 0);
           break;
       }
       break;
     case WM_CLOSE:
-      TRY_BOOL(DestroyWindow(hwnd));
+      throwIf(DestroyWindow(hwnd) == 0);
       break;
     case WM_DESTROY: {
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-      THROW_IF(userData == 0, "GetWindowLongPtrW failed");
+      throwIf(userData == 0);
 
       auto& state = *reinterpret_cast<State*>(userData);
       if (state.dialog != nullptr) {
-        TRY_BOOL(DestroyWindow(state.dialog));
+        throwIf(DestroyWindow(state.dialog) == 0);
       }
 
       PostQuitMessage(0);
@@ -638,13 +651,13 @@ int TryMain(HINSTANCE hInstance)
   (void)SetThreadDpiAwarenessContext(
       DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-  TRY_HR(CoInitialize(nullptr));
+  throwIfCOM(CoInitialize(nullptr));
 
   auto guid = GUID {};
-  TRY_HR(CoCreateGuid(&guid));
+  throwIfCOM(CoCreateGuid(&guid));
 
   auto deviceEnumerator = ComPtr<IMMDeviceEnumerator>();
-  TRY_HR(CoCreateInstance(  //
+  throwIfCOM(CoCreateInstance(  //
       __uuidof(MMDeviceEnumerator),
       nullptr,
       CLSCTX_INPROC_SERVER,
@@ -653,7 +666,7 @@ int TryMain(HINSTANCE hInstance)
 
   auto richEdit = Library(L"Riched20.dll");
   auto cursor = LoadCursorW(nullptr, IDC_ARROW);
-  THROW_IF(cursor == nullptr, "LoadCursorW failed");
+  throwIf(cursor == nullptr);
 
   auto mainWindowClass = WNDCLASSW  //
       {.lpfnWndProc = MainWndProc,
@@ -661,7 +674,7 @@ int TryMain(HINSTANCE hInstance)
        .hCursor = cursor,
        .lpszClassName = L"AlwaysMute - Main"};
   auto mainAtom = RegisterClassW(&mainWindowClass);
-  THROW_IF(mainAtom == 0, "RegisterClassW failed");
+  throwIf(mainAtom == 0);
 
   auto state = State  //
       {.hInstance = hInstance,
@@ -679,14 +692,14 @@ int TryMain(HINSTANCE hInstance)
       nullptr,
       hInstance,
       &state);
-  THROW_IF(window == nullptr, "CreateWindowW failed");
+  throwIf(window == nullptr);
 
-  TRY_HR(deviceEnumerator->RegisterEndpointNotificationCallback(
+  throwIfCOM(deviceEnumerator->RegisterEndpointNotificationCallback(
       new NotificationClient(window)));
 
   auto sndVol = Library(L"SndVolSSO.dll");
   auto icon = LoadIconW(sndVol.library, MAKEINTRESOURCEW(120));
-  THROW_IF(icon == nullptr, "LoadIconW failed");
+  throwIf(icon == nullptr);
 
   auto trayIconData = NOTIFYICONDATAW {
       .cbSize = sizeof(NOTIFYICONDATAW),
@@ -701,13 +714,13 @@ int TryMain(HINSTANCE hInstance)
 
   auto msg = MSG {};
   (void)PeekMessageW(&msg, window, 0, 0, PM_NOREMOVE);
-  TRY_BOOL(PostMessageW(window, UserMessage::GetDefaultEndpoint, 0, 0));
+  throwIf(PostMessageW(window, UserMessage::GetDefaultEndpoint, 0, 0) == 0);
 
   while (true) {
     if (auto result = GetMessageW(&msg, nullptr, 0, 0); result == 0) {
       break;
     } else {
-      THROW_IF(result == -1, "GetMessageW failed");
+      throwIf(result == -1);
     }
 
     if (state.dialog != nullptr && IsDialogMessageW(state.dialog, &msg) != 0) {
@@ -733,7 +746,28 @@ int WINAPI wWinMain(  //
   } catch (std::exception const& error) {
     OutputDebugStringA(error.what());
     OutputDebugStringA("\n");
-
-    return 1;
+  } catch (_com_error const& error) {
+    constexpr auto bufferSize = DWORD {4096};
+    auto buffer = std::array<wchar_t, bufferSize>();
+    auto charactersWrittenWithoutNull = FormatMessageW(  //
+        FORMAT_MESSAGE_FROM_SYSTEM,
+        nullptr,
+        static_cast<DWORD>(error.Error()),
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),
+        buffer.data(),
+        bufferSize,
+        nullptr);
+    if (charactersWrittenWithoutNull != 0) {
+      auto it = buffer.begin() + charactersWrittenWithoutNull;
+      (void)std::ranges::copy(
+          L"\n\0"sv,
+          std::counted_iterator(it, std::distance(buffer.end(), it)));
+      buffer[buffer.size() - 1] = L'\0';
+      OutputDebugStringW(buffer.data());
+    } else {
+      OutputDebugStringW(L"Can't get error message\n");
+    }
   }
+
+  return 1;
 }
