@@ -759,10 +759,14 @@ int WINAPI wWinMain(  //
         nullptr);
     if (charactersWrittenWithoutNull != 0) {
       auto it = buffer.begin() + charactersWrittenWithoutNull;
-      (void)std::ranges::copy(
-          L"\n\0"sv,
-          std::counted_iterator(it, std::distance(buffer.end(), it)));
-      buffer[buffer.size() - 1] = L'\0';
+      auto tail = L"\n\0"sv;
+      if (auto distance =
+              static_cast<std::size_t>(std::distance(it, buffer.end()));
+          tail.size() > distance)
+      {
+        tail.remove_prefix(tail.size() - distance);
+      }
+      (void)std::ranges::copy(tail, it);
       OutputDebugStringW(buffer.data());
     } else {
       OutputDebugStringW(L"Can't get error message\n");
