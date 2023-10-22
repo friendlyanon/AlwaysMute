@@ -8,6 +8,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <new>
 #include <ranges>
 #include <stacktrace>
 #include <stdexcept>
@@ -24,7 +25,7 @@
 #include <shellapi.h>
 
 #pragma warning(push)
-#pragma warning(disable: 4365)
+#pragma warning(disable : 4365)
 #include <comdef.h>
 #pragma warning(pop)
 
@@ -69,6 +70,12 @@ void throwIfCOM(HRESULT result,
     std::cerr << stacktrace << '\n';
     _com_raise_error(result);
   }
+}
+
+template<typename T>
+T* as_ptr(auto value)
+{
+  return std::launder(reinterpret_cast<T*>(value));
 }
 
 struct UserMessage
@@ -494,12 +501,12 @@ INT_PTR CALLBACK DialogProc(  //
       return TRUE;
     }
     case WM_NOTIFY:
-      switch (reinterpret_cast<LPNMHDR>(lParam)->code) {
+      switch (as_ptr<NMHDR>(lParam)->code) {
         case EN_LINK: {
           if (LOWORD(wParam) != LicenseDialogData::textId) {
             break;
           }
-          switch (reinterpret_cast<ENLINK*>(lParam)->msg) {
+          switch (as_ptr<ENLINK>(lParam)->msg) {
             case WM_LBUTTONUP:
               (void)ShellExecuteW(
                   hwnd, L"open", GPL_URL, nullptr, nullptr, SW_SHOW);
@@ -522,7 +529,7 @@ INT_PTR CALLBACK DialogProc(  //
     case WM_DESTROY: {
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
       throwIf(userData == 0);
-      *reinterpret_cast<HWND*>(userData) = nullptr;
+      *as_ptr<HWND>(userData) = nullptr;
       return TRUE;
     }
   }
@@ -544,7 +551,7 @@ LRESULT CALLBACK MainWndProc(  //
 {
   switch (message) {
     case WM_CREATE: {
-      auto* state = reinterpret_cast<CREATESTRUCT*>(lParam)->lpCreateParams;
+      auto* state = as_ptr<CREATESTRUCT>(lParam)->lpCreateParams;
       SetLastError(0);
       if (SetWindowLongPtrW(
               hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state))
@@ -566,7 +573,7 @@ LRESULT CALLBACK MainWndProc(  //
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
       throwIf(userData == 0);
 
-      auto& state = *reinterpret_cast<State*>(userData);
+      auto& state = *as_ptr<State>(userData);
       state.endpointVolume.reset();
       state.audioDevice.reset();
 
@@ -593,7 +600,7 @@ LRESULT CALLBACK MainWndProc(  //
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
       throwIf(userData == 0);
 
-      ChangeAudio(*reinterpret_cast<State*>(userData));
+      ChangeAudio(*as_ptr<State>(userData));
       break;
     }
     case WM_COMMAND:
@@ -602,7 +609,7 @@ LRESULT CALLBACK MainWndProc(  //
           auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
           throwIf(userData == 0);
 
-          auto& state = *reinterpret_cast<State*>(userData);
+          auto& state = *as_ptr<State>(userData);
           if (state.dialog != nullptr) {
             break;
           }
@@ -628,7 +635,7 @@ LRESULT CALLBACK MainWndProc(  //
       auto userData = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
       throwIf(userData == 0);
 
-      auto& state = *reinterpret_cast<State*>(userData);
+      auto& state = *as_ptr<State>(userData);
       if (state.dialog != nullptr) {
         throwIf(DestroyWindow(state.dialog) == 0);
       }
