@@ -41,6 +41,33 @@ using namespace std::string_view_literals;
 namespace
 {
 
+void outputSystemError(DWORD error = GetLastError())
+{
+  constexpr auto bufferSize = DWORD {4096};
+  auto buffer = std::array<wchar_t, bufferSize>();
+  auto charactersWrittenWithoutNull = FormatMessageW(  //
+      FORMAT_MESSAGE_FROM_SYSTEM,
+      nullptr,
+      error,
+      MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),
+      buffer.data(),
+      bufferSize,
+      nullptr);
+  if (charactersWrittenWithoutNull != 0) {
+    auto it = buffer.begin() + charactersWrittenWithoutNull;
+    auto tail = L"\n\0"sv;
+    if (auto distance = static_cast<std::size_t>(buffer.end() - it);
+        tail.size() > distance)
+    {
+      tail.remove_prefix(tail.size() - distance);
+    }
+    (void)std::ranges::copy(tail, it);
+    OutputDebugStringW(buffer.data());
+  } else {
+    OutputDebugStringW(L"Can't get error message\n");
+  }
+}
+
 [[noreturn]] void throw_(
     DWORD error, std::stacktrace stacktrace = std::stacktrace::current())
 {
@@ -115,10 +142,10 @@ struct Handle
   {
   }
 
-  ~Handle() noexcept(false)
+  ~Handle()
   {
-    if (handle != nullptr) {
-      throwIf(CloseHandle(handle) == 0);
+    if (handle != nullptr && CloseHandle(handle) == 0) {
+      outputSystemError();
     }
   }
 };
@@ -133,10 +160,10 @@ struct Library
     throwIf(library == nullptr);
   }
 
-  ~Library() noexcept(false)
+  ~Library()
   {
-    if (library != nullptr) {
-      throwIf(FreeLibrary(library) == 0);
+    if (library != nullptr && FreeLibrary(library) == 0) {
+      outputSystemError();
     }
   }
 };
@@ -152,9 +179,11 @@ public:
     throwIf(Shell_NotifyIconW(NIM_ADD, &iconData) == FALSE);
   }
 
-  ~TrayIcon() noexcept(false)
+  ~TrayIcon()
   {
-    throwIf(Shell_NotifyIconW(NIM_DELETE, iconData) == FALSE);
+    if (Shell_NotifyIconW(NIM_DELETE, iconData) == FALSE) {
+      OutputDebugStringW(L"Shell_NotifyIconW(NIM_DELETE) failed\n");
+    }
   }
 };
 
@@ -752,32 +781,9 @@ int WINAPI wWinMain(  //
     return TryMain(hInstance);
   } catch (std::exception const& error) {
     OutputDebugStringA(error.what());
-    OutputDebugStringA("\n");
+    OutputDebugStringW(L"\n");
   } catch (_com_error const& error) {
-    constexpr auto bufferSize = DWORD {4096};
-    auto buffer = std::array<wchar_t, bufferSize>();
-    auto charactersWrittenWithoutNull = FormatMessageW(  //
-        FORMAT_MESSAGE_FROM_SYSTEM,
-        nullptr,
-        static_cast<DWORD>(error.Error()),
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),
-        buffer.data(),
-        bufferSize,
-        nullptr);
-    if (charactersWrittenWithoutNull != 0) {
-      auto it = buffer.begin() + charactersWrittenWithoutNull;
-      auto tail = L"\n\0"sv;
-      if (auto distance =
-              static_cast<std::size_t>(std::distance(it, buffer.end()));
-          tail.size() > distance)
-      {
-        tail.remove_prefix(tail.size() - distance);
-      }
-      (void)std::ranges::copy(tail, it);
-      OutputDebugStringW(buffer.data());
-    } else {
-      OutputDebugStringW(L"Can't get error message\n");
-    }
+    outputSystemError(static_cast<DWORD>(error.Error()));
   }
 
   return 1;
