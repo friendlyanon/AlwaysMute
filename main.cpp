@@ -145,6 +145,7 @@ struct Handle
   ~Handle()
   {
     if (handle != nullptr && CloseHandle(handle) == 0) {
+      std::cerr << std::stacktrace::current() << '\n';
       outputSystemError();
     }
   }
@@ -163,6 +164,7 @@ struct Library
   ~Library()
   {
     if (library != nullptr && FreeLibrary(library) == 0) {
+      std::cerr << std::stacktrace::current() << '\n';
       outputSystemError();
     }
   }
@@ -182,6 +184,7 @@ public:
   ~TrayIcon()
   {
     if (Shell_NotifyIconW(NIM_DELETE, iconData) == FALSE) {
+      std::cerr << std::stacktrace::current() << '\n';
       OutputDebugStringW(L"Shell_NotifyIconW(NIM_DELETE) failed\n");
     }
   }
