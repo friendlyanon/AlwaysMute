@@ -46,7 +46,7 @@ void outputSystemError(DWORD error = GetLastError())
   constexpr auto bufferSize = DWORD {4096};
   auto buffer = std::array<wchar_t, bufferSize>();
   auto charactersWrittenWithoutNull = FormatMessageW(  //
-      FORMAT_MESSAGE_FROM_SYSTEM,
+      FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
       nullptr,
       error,
       MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),
