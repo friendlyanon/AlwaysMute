@@ -142,6 +142,8 @@ struct Handle
   {
   }
 
+  Handle(Handle&&) = delete;
+
   ~Handle()
   {
     if (handle != nullptr && CloseHandle(handle) == 0) {
@@ -160,6 +162,8 @@ struct Library
   {
     throwIf(library == nullptr);
   }
+
+  Library(Library&&) = delete;
 
   ~Library()
   {
@@ -181,6 +185,8 @@ public:
     throwIf(Shell_NotifyIconW(NIM_ADD, &iconData) == FALSE);
   }
 
+  TrayIcon(TrayIcon&&) = delete;
+
   ~TrayIcon()
   {
     if (Shell_NotifyIconW(NIM_DELETE, iconData) == FALSE) {
@@ -196,6 +202,8 @@ class EndpointHandler : public IAudioEndpointVolumeCallback
   GUID* guid {};
   HWND window {};
 
+  virtual ~EndpointHandler() {}
+
 public:
   EndpointHandler(GUID& guid, HWND window)
       : guid(&guid)
@@ -204,8 +212,6 @@ public:
   }
 
   EndpointHandler(EndpointHandler&&) = delete;
-
-  virtual ~EndpointHandler() {}
 
   ULONG STDMETHODCALLTYPE AddRef() override
   {
@@ -265,6 +271,8 @@ class NotificationClient : public IMMNotificationClient
   ULONG refCount {};
   HWND window {};
 
+  virtual ~NotificationClient() {}
+
 public:
   explicit NotificationClient(HWND window)
       : window(window)
@@ -272,8 +280,6 @@ public:
   }
 
   NotificationClient(NotificationClient&&) = delete;
-
-  virtual ~NotificationClient() {}
 
   ULONG STDMETHODCALLTYPE AddRef() override
   {
