@@ -4,6 +4,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <exception>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -194,6 +195,28 @@ public:
       OutputDebugStringW(L"Shell_NotifyIconW(NIM_DELETE) failed\n");
     }
   }
+};
+
+template<DerivedFrom<IUnknown> T>
+class ComCallback
+{
+  T* callback;
+
+public:
+  template<typename... Args>
+  explicit ComCallback(Args&&... args)
+      : callback(new T(std::forward<Args>(args)...))
+  {
+  }
+
+  ~ComCallback()
+  {
+    if (std::uncaught_exceptions() != 0) {
+      callback->Release();
+    }
+  }
+
+  operator T*() { return callback; }
 };
 
 class EndpointHandler : public IAudioEndpointVolumeCallback
@@ -630,7 +653,7 @@ LRESULT CALLBACK MainWndProc(  //
           nullptr,
           std::out_ptr(state.endpointVolume)));
       throwIfCOM(state.endpointVolume->RegisterControlChangeNotify(
-          new EndpointHandler(*state.guid, hwnd)));
+          ComCallback<EndpointHandler>(*state.guid, hwnd)));
       ChangeAudio(state);
       break;
     }
@@ -740,7 +763,7 @@ int TryMain(HINSTANCE hInstance)
   throwIf(window == nullptr);
 
   throwIfCOM(deviceEnumerator->RegisterEndpointNotificationCallback(
-      new NotificationClient(window)));
+      ComCallback<NotificationClient>(window)));
 
   auto sndVol = Library(L"SndVolSSO.dll");
   auto icon = LoadIconW(sndVol.library, MAKEINTRESOURCEW(120));
