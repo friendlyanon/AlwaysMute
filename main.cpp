@@ -25,11 +25,6 @@
 #include <objbase.h>
 #include <shellapi.h>
 
-#pragma warning(push)
-#pragma warning(disable : 4365)
-#include <comdef.h>
-#pragma warning(pop)
-
 #define PRECONDITION(x) \
   do { \
     if (!(x)) { \
@@ -41,6 +36,16 @@ using namespace std::string_view_literals;
 
 namespace
 {
+
+class com_error : public std::exception
+{
+  HRESULT _code;
+
+public:
+  explicit com_error(HRESULT code) : _code(code) {}
+
+  HRESULT code() const { return _code; }
+};
 
 void outputSystemError(DWORD error = GetLastError())
 {
@@ -96,7 +101,7 @@ void throwIfCOM(HRESULT result,
 {
   if (FAILED(result)) {
     std::cerr << stacktrace << '\n';
-    _com_raise_error(result);
+    throw com_error(result);
   }
 }
 
@@ -811,11 +816,11 @@ int WINAPI wWinMain(  //
 {
   try {
     return TryMain(hInstance);
+  } catch (com_error const& error) {
+    outputSystemError(static_cast<DWORD>(error.code()));
   } catch (std::exception const& error) {
     OutputDebugStringA(error.what());
     OutputDebugStringW(L"\n");
-  } catch (_com_error const& error) {
-    outputSystemError(static_cast<DWORD>(error.Error()));
   }
 
   return 1;
