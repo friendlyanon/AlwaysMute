@@ -25,12 +25,29 @@
 #include <objbase.h>
 #include <shellapi.h>
 
-#define PRECONDITION(x) \
-  do { \
-    if (!(x)) { \
-      throw std::runtime_error("Precondition [ " #x " ] not met"); \
+#define ADDREF_RELEASE_METHODS \
+  ULONG STDMETHODCALLTYPE AddRef() override \
+  { \
+    auto result = InterlockedIncrement(&refCount); \
+    if (static_cast<LONG>(result) < 0) { \
+      std::cerr << std::stacktrace::current() << '\n'; \
+      throw std::runtime_error("refCount went beyond LONG_MAX"); \
     } \
-  } while (false)
+    return result; \
+  } \
+\
+  ULONG STDMETHODCALLTYPE Release() override \
+  { \
+    auto result = InterlockedDecrement(&refCount); \
+    if (static_cast<LONG>(result) < 0) { \
+      std::cerr << std::stacktrace::current() << '\n'; \
+      throw std::runtime_error("refCount was not bigger than 0"); \
+    } \
+    if (result == 0) { \
+      delete this; \
+    } \
+    return result; \
+  }
 
 using namespace std::string_view_literals;
 
@@ -241,21 +258,7 @@ public:
 
   EndpointHandler(EndpointHandler&&) = delete;
 
-  ULONG STDMETHODCALLTYPE AddRef() override
-  {
-    PRECONDITION(refCount != std::numeric_limits<ULONG>::max());
-    return InterlockedIncrement(&refCount);
-  }
-
-  ULONG STDMETHODCALLTYPE Release() override
-  {
-    PRECONDITION(refCount > 0);
-    auto result = InterlockedDecrement(&refCount);
-    if (result == 0) {
-      delete this;
-    }
-    return result;
-  }
+  ADDREF_RELEASE_METHODS
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
                                            void** ppvObject) override
@@ -309,21 +312,7 @@ public:
 
   NotificationClient(NotificationClient&&) = delete;
 
-  ULONG STDMETHODCALLTYPE AddRef() override
-  {
-    PRECONDITION(refCount != std::numeric_limits<ULONG>::max());
-    return InterlockedIncrement(&refCount);
-  }
-
-  ULONG STDMETHODCALLTYPE Release() override
-  {
-    PRECONDITION(refCount > 0);
-    auto result = InterlockedDecrement(&refCount);
-    if (result == 0) {
-      delete this;
-    }
-    return result;
-  }
+  ADDREF_RELEASE_METHODS
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
                                            void** ppvObject) override
@@ -521,7 +510,7 @@ struct State
 wchar_t const* gplNotice =
     L""
     "AlwaysMute to keep the default audio device on Windows quiet\n"
-    "Copyright (C) 2023 friendlyanon\n\n"
+    "Copyright (C) 2025 friendlyanon\n\n"
     "AlwaysMute is free software: you can redistribute it and/or modify\n"
     "it under the terms of the GNU General Public License as published by\n"
     "the Free Software Foundation, version 3.\n\n"
