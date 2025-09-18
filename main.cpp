@@ -59,7 +59,10 @@ class com_error : public std::exception
   HRESULT _code;
 
 public:
-  explicit com_error(HRESULT code) : _code(code) {}
+  explicit com_error(HRESULT code)
+      : _code(code)
+  {
+  }
 
   HRESULT code() const { return _code; }
 };
@@ -364,29 +367,52 @@ public:
   }
 };
 
+struct PopupMenu
+{
+  HMENU popup {};
+
+  PopupMenu()
+      : popup(CreatePopupMenu())
+  {
+    throwIf(popup == nullptr);
+  }
+
+  PopupMenu(PopupMenu&&) = delete;
+
+  ~PopupMenu()
+  {
+    if (popup != nullptr && DestroyMenu(popup) == 0) {
+      std::cerr << std::stacktrace::current() << '\n';
+      outputSystemError();
+    }
+  }
+};
+
 void ShowContextMenu(HWND hwnd)
 {
-  auto popup = CreatePopupMenu();
-  throwIf(popup == nullptr);
+  auto popup = PopupMenu();
 
-  throwIf(InsertMenuW(popup,
+  throwIf(InsertMenuW(popup.popup,
                       0,
                       MF_BYPOSITION | MF_STRING,
                       UserMessage::TrayLicense,
                       L"License")
           == 0);
 
-  throwIf(
-      InsertMenuW(
-          popup, 1, MF_BYPOSITION | MF_STRING, UserMessage::TrayExit, L"Exit")
-      == 0);
+  throwIf(InsertMenuW(popup.popup,
+                      1,
+                      MF_BYPOSITION | MF_STRING,
+                      UserMessage::TrayExit,
+                      L"Exit")
+          == 0);
 
   (void)SetForegroundWindow(hwnd);
 
   auto point = POINT {};
   throwIf(GetCursorPos(&point) == 0);
 
-  throwIf(TrackPopupMenu(popup, 0, point.x, point.y, 0, hwnd, nullptr) == 0);
+  throwIf(TrackPopupMenu(popup.popup, 0, point.x, point.y, 0, hwnd, nullptr)
+          == 0);
 }
 
 class LicenseDialogData
