@@ -426,7 +426,9 @@ private:
   struct Storage
   {
     static_assert(Size != 0);
-    alignas(DLGTEMPLATE) std::byte buffer[Size] {};
+
+    // DLGTEMPLATE is a packed struct and its largest members are DWORD (4)
+    alignas(4) std::byte buffer[Size] {};
   };
 
   static constexpr auto precalculatedDialogData = []
