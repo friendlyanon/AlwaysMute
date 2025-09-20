@@ -559,7 +559,8 @@ INT_PTR CALLBACK DialogProc(  //
     case WM_INITDIALOG: {
       SetLastError(0);
       if (SetWindowLongPtrW(hwnd, GWLP_USERDATA, lParam) == 0) {
-        throwIf(GetLastError() != 0);
+        auto error = GetLastError();
+        throwIf(error != 0, error);
       }
 
       (void)SendDlgItemMessageW(
