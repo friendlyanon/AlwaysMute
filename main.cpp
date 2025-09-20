@@ -572,8 +572,8 @@ wchar_t const* gplNotice =
     "the Free Software Foundation, version 3.\n\n"
     "AlwaysMute is distributed in the hope that it will be useful,\n"
     "but WITHOUT ANY WARRANTY; without even the implied warranty of\n"
-    "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the\n"
-    "GNU General Public License for more details.\n\n"
+    "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
+    "See the GNU General Public License for more details.\n\n"
     "You should have received a copy of the GNU General Public License\n"
     "along with AlwaysMute. If not, see <" GPL_URL ">.";
 
