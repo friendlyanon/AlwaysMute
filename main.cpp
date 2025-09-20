@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <charconv>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -49,6 +50,14 @@
     return result; \
   }
 
+#ifndef NEVER_INLINE
+#  ifdef _MSC_VER
+#    define NEVER_INLINE __declspec(noinline)
+#  else
+#    define NEVER_INLINE __attribute__((__noinline__))
+#  endif
+#endif
+
 using namespace std::string_view_literals;
 
 namespace
@@ -94,36 +103,55 @@ void outputSystemError(DWORD error = GetLastError())
   }
 }
 
-[[noreturn]] void throw_(
-    DWORD error, std::stacktrace stacktrace = std::stacktrace::current())
+void printLine(std::int32_t line)
 {
-  std::cerr << stacktrace << '\n';
+  wchar_t buffer[19] = L"Line: ";
+  auto* out = buffer + 6;
+  auto* start = reinterpret_cast<char*>(out);
+  auto [ptr, ec] =
+      std::to_chars(start, reinterpret_cast<char*>(buffer + 11), line, 10);
+  out += ptr - start;
+  for (*out = L'\n';;) {
+    if (--ptr == start) {
+      break;
+    }
+
+    *--out = std::exchange(*ptr, '\0');
+  }
+  OutputDebugStringW(buffer);
+}
+
+[[noreturn]] NEVER_INLINE void throw_(std::int32_t line, DWORD error)
+{
+  printLine(line);
+  OutputDebugStringA(std::to_string(std::stacktrace::current(1)).c_str());
   throw std::system_error(static_cast<int>(error), std::system_category());
 }
 
-void throwIf(bool condition,
-             DWORD error,
-             std::stacktrace stacktrace = std::stacktrace::current())
+void throwIf_(std::int32_t line, bool condition, DWORD error)
 {
   if (condition) {
-    throw_(error, stacktrace);
+    throw_(line, error);
   }
 }
 
-void throwIf(bool condition,
-             std::stacktrace stacktrace = std::stacktrace::current())
+void throwIf_(std::int32_t line, bool condition)
 {
-  throwIf(condition, GetLastError(), stacktrace);
+  throwIf_(line, condition, GetLastError());
 }
 
-void throwIfCOM(HRESULT result,
-                std::stacktrace stacktrace = std::stacktrace::current())
+NEVER_INLINE void throwIfCOM_(std::int32_t line, HRESULT result)
 {
   if (FAILED(result)) {
-    std::cerr << stacktrace << '\n';
+    printLine(line);
+    OutputDebugStringA(std::to_string(std::stacktrace::current(1)).c_str());
     throw com_error(result);
   }
 }
+
+#define throwIf(...) throwIf_(__LINE__, __VA_ARGS__)
+
+#define throwIfCOM(...) throwIfCOM_(__LINE__, __VA_ARGS__)
 
 template<typename T>
 T* as_ptr(auto value)
