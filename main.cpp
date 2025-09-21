@@ -443,6 +443,15 @@ void ShowContextMenu(HWND hwnd)
           == 0);
 }
 
+template<std::size_t Size>
+struct Storage
+{
+  static_assert(Size != 0);
+
+  // DLGTEMPLATE is a packed struct and its largest members are DWORD (4)
+  alignas(4) std::byte buffer[Size] {};
+};
+
 class LicenseDialogData
 {
 public:
@@ -450,15 +459,6 @@ public:
   static constexpr WORD textId = 2;
 
 private:
-  template<std::size_t Size>
-  struct Storage
-  {
-    static_assert(Size != 0);
-
-    // DLGTEMPLATE is a packed struct and its largest members are DWORD (4)
-    alignas(4) std::byte buffer[Size] {};
-  };
-
   static constexpr auto precalculatedDialogData = []
   {
     constexpr auto oversized = []
