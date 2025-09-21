@@ -6,7 +6,6 @@
 #include <charconv>
 #include <cstdint>
 #include <exception>
-#include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -31,7 +30,7 @@
   { \
     auto result = InterlockedIncrement(&refCount); \
     if (static_cast<LONG>(result) < 0) { \
-      std::cerr << std::stacktrace::current() << '\n'; \
+      outputStacktrace(); \
       throw std::runtime_error("refCount went beyond LONG_MAX"); \
     } \
     return result; \
@@ -41,7 +40,7 @@
   { \
     auto result = InterlockedDecrement(&refCount); \
     if (static_cast<LONG>(result) < 0) { \
-      std::cerr << std::stacktrace::current() << '\n'; \
+      outputStacktrace(); \
       throw std::runtime_error("refCount was not bigger than 0"); \
     } \
     if (result == 0) { \
@@ -121,10 +120,16 @@ void printLine(std::int32_t line)
   OutputDebugStringW(buffer);
 }
 
+NEVER_INLINE void outputStacktrace(std::size_t skip = 0)
+{
+  OutputDebugStringA(
+      std::to_string(std::stacktrace::current(skip + 1)).c_str());
+}
+
 [[noreturn]] NEVER_INLINE void throw_(std::int32_t line, DWORD error)
 {
   printLine(line);
-  OutputDebugStringA(std::to_string(std::stacktrace::current(1)).c_str());
+  outputStacktrace(1);
   throw std::system_error(static_cast<int>(error), std::system_category());
 }
 
@@ -135,7 +140,7 @@ void throwIf_(std::int32_t line, bool condition, DWORD error)
   }
 }
 
-void throwIf_(std::int32_t line, bool condition)
+NEVER_INLINE void throwIf_(std::int32_t line, bool condition)
 {
   throwIf_(line, condition, GetLastError());
 }
@@ -144,7 +149,7 @@ NEVER_INLINE void throwIfCOM_(std::int32_t line, HRESULT result)
 {
   if (FAILED(result)) {
     printLine(line);
-    OutputDebugStringA(std::to_string(std::stacktrace::current(1)).c_str());
+    outputStacktrace(1);
     throw com_error(result);
   }
 }
@@ -201,7 +206,7 @@ struct Handle
   ~Handle()
   {
     if (handle != nullptr && CloseHandle(handle) == 0) {
-      std::cerr << std::stacktrace::current() << '\n';
+      outputStacktrace();
       outputSystemError();
     }
   }
@@ -222,7 +227,7 @@ struct Library
   ~Library()
   {
     if (library != nullptr && FreeLibrary(library) == 0) {
-      std::cerr << std::stacktrace::current() << '\n';
+      outputStacktrace();
       outputSystemError();
     }
   }
@@ -244,7 +249,7 @@ public:
   ~TrayIcon()
   {
     if (Shell_NotifyIconW(NIM_DELETE, iconData) == FALSE) {
-      std::cerr << std::stacktrace::current() << '\n';
+      outputStacktrace();
       OutputDebugStringW(L"Shell_NotifyIconW(NIM_DELETE) failed\n");
     }
   }
@@ -410,7 +415,7 @@ struct PopupMenu
   ~PopupMenu()
   {
     if (popup != nullptr && DestroyMenu(popup) == 0) {
-      std::cerr << std::stacktrace::current() << '\n';
+      outputStacktrace();
       outputSystemError();
     }
   }
@@ -671,7 +676,8 @@ LRESULT CALLBACK MainWndProc(  //
       {
         break;
       }
-      throwIf(GetLastError() != 0);
+      auto error = GetLastError();
+      throwIf(error != 0, error);
       break;
     }
     case UserMessage::TrayIcon:
