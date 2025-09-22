@@ -5,6 +5,7 @@
 #include <bit>
 #include <charconv>
 #include <cstdint>
+#include <cwctype>
 #include <exception>
 #include <iterator>
 #include <limits>
@@ -88,42 +89,37 @@ void outputSystemError(DWORD error = GetLastError())
       bufferSize,
       nullptr);
   if (charactersWrittenWithoutNull != 0) {
-    auto it = buffer.begin() + charactersWrittenWithoutNull;
+    auto sub = std::ranges::find_last_if(
+        buffer.begin(),
+        buffer.begin() + charactersWrittenWithoutNull + 1,
+        [](wchar_t c) { return !std::iswspace(static_cast<wint_t>(c)); });
     auto tail = L"\n\0"sv;
-    if (auto distance = static_cast<std::size_t>(buffer.end() - it);
+    if (auto distance = static_cast<std::size_t>(bufferSize) - sub.size();
         tail.size() > distance)
     {
       tail.remove_prefix(tail.size() - distance);
     }
-    (void)std::ranges::copy(tail, it);
+    (void)std::ranges::copy(tail, sub.data() + sub.size());
     OutputDebugStringW(buffer.data());
   } else {
-    OutputDebugStringW(L"Can't get error message\n");
+    OutputDebugStringA("Can't get error message\n");
   }
 }
 
 void printLine(std::int32_t line)
 {
-  wchar_t buffer[19] = L"Line: ";
-  auto* out = buffer + 6;
-  auto* start = reinterpret_cast<char*>(out);
+  char buffer[19] = "Line: ";
   auto [ptr, ec] =
-      std::to_chars(start, reinterpret_cast<char*>(buffer + 11), line, 10);
-  out += ptr - start;
-  for (*out = L'\n';;) {
-    if (--ptr == start) {
-      break;
-    }
-
-    *--out = std::exchange(*ptr, '\0');
-  }
-  OutputDebugStringW(buffer);
+      std::to_chars(buffer + 6, buffer + sizeof(buffer) - 2, line, 10);
+  *ptr = '\n';
+  OutputDebugStringA(buffer);
 }
 
 NEVER_INLINE void outputStacktrace(std::size_t skip = 0)
 {
   OutputDebugStringA(
       std::to_string(std::stacktrace::current(skip + 1)).c_str());
+  OutputDebugStringA("\n");
 }
 
 [[noreturn]] NEVER_INLINE void throw_(std::int32_t line, DWORD error)
@@ -250,7 +246,7 @@ public:
   {
     if (Shell_NotifyIconW(NIM_DELETE, iconData) == FALSE) {
       outputStacktrace();
-      OutputDebugStringW(L"Shell_NotifyIconW(NIM_DELETE) failed\n");
+      OutputDebugStringA("Shell_NotifyIconW(NIM_DELETE) failed\n");
     }
   }
 };
@@ -872,7 +868,7 @@ int WINAPI wWinMain(  //
     outputSystemError(static_cast<DWORD>(error.code()));
   } catch (std::exception const& error) {
     OutputDebugStringA(error.what());
-    OutputDebugStringW(L"\n");
+    OutputDebugStringA("\n");
   }
 
   return 1;
